@@ -2,7 +2,7 @@
 
 **Course:** Large Language Models & Multi-Agent Systems (LMA) — Assignment 1  
 **Author:** Naveen Mishra  
-**Repository:** [github.com/Mveen3/lma-a1](https://github.com/Mveen3/lma-a1)  
+**GitHub Repository:** [https://github.com/Mveen3/lma-a1](https://github.com/Mveen3/lma-a1)  
 
 ---
 
