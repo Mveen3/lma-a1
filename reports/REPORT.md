@@ -1,7 +1,7 @@
 # Experimental Report: Two-Stage RAG Pipeline (Baseline Dense Retrieval vs. Cross-Encoder Re-Ranking)
 
 **Author:** Naveen Mishra  
-**Course:** Large Language Models & Multi-Agent Systems (LMA) — Assignment 1  
+**Course:** Large Language Models & Multi-Agent Systems (LMA): Assignment 1  
 **GitHub Repository:** [https://github.com/Mveen3/lma-a1](https://github.com/Mveen3/lma-a1)  
 **Dataset:** Official Catan (5th Edition) Game Rules & Almanac (`data/catan_base_rules_2020.pdf`, 16 pages, 160 chunks)  
 **Deliverables:**
@@ -12,7 +12,7 @@
 
 ## Dataset Selection & Rationale
 
-Per the assignment specifications under **Section 1 (Setup & Environment)**, suitable datasets include technical policies, regulatory/legal texts, or *an in-depth board game rulebook*. We selected the **Official Catan (5th Edition) Game Rules & Almanac** (`data/catan_base_rules_2020.pdf`, 16 pages, 160 extracted chunks) for the following experimental reasons:
+Per the assignment specifications under **Section 1 (Setup & Environment)**, suitable datasets include technical policies, regulatory/legal texts, or *an in-depth board game rulebook*. I selected the **Official Catan (5th Edition) Game Rules & Almanac** (`data/catan_base_rules_2020.pdf`, 16 pages, 160 extracted chunks) for the following experimental reasons:
 
 1. **Alignment with Problem Statement:** It directly fulfills the instructor's explicit recommendation for an in-depth rulebook containing complex, interconnected specifications.
 2. **Dispersed Clauses & Non-Trivial Hierarchy:** Catan structures rules hierarchically between high-level gameplay rules (Pages 3–7) and an alphabetical reference Almanac (Pages 8–15). Core concepts like *Trading* or *Road Building* have general mechanics stated early on, while critical restrictions (e.g., prohibition of zero-card trades or like-for-like trades) are buried in the Almanac.
@@ -102,7 +102,7 @@ A common question in retrieval design is: *If Cross-Encoders are significantly m
 The answer lies in **computational complexity, asymptotic scaling, and pre-computability**:
 
 ### 1. The Impossibility of Offline Pre-Computation
-* In a **Bi-Encoder**, document representations $\mathbf{v}_i = \text{Encoder}(d_i)$ are completely decoupled from query $q$. We can pre-encode millions of documents offline, store them in memory or on NVMe SSDs, and build sub-linear approximate nearest neighbor (ANN) indices (such as HNSW or IVF-PQ in FAISS). At runtime, we only encode the query once and perform cheap vector dot-products.
+* In a **Bi-Encoder**, document representations $\mathbf{v}_i = \text{Encoder}(d_i)$ are completely decoupled from query $q$. One can pre-encode millions of documents offline, store them in memory or on NVMe SSDs, and build sub-linear approximate nearest neighbor (ANN) indices (such as HNSW or IVF-PQ in FAISS). At runtime, the system only encodes the query once and performs cheap vector dot-products.
 * In a **Cross-Encoder**, the input to the network is $[\text{CLS}] \circ q \circ [\text{SEP}] \circ d_i \circ [\text{SEP}]$. Because the sequence requires both $q$ and $d_i$ simultaneously, **no document representation can be pre-computed offline**. Every document must be processed through the entire neural network at query time.
 
 ### 2. Asymptotic Scaling Analysis ($N$ vs. $K$)
@@ -125,11 +125,11 @@ graph LR
 
 ### 3. Quantitative Scaling Comparison
 
-Based on our empirical benchmark of $1.68\text{ ms}$ per candidate chunk on an AMD Ryzen 7 7445HS:
+Based on my empirical benchmark of $1.68\text{ ms}$ per candidate chunk on an AMD Ryzen 7 7445HS:
 
 | Corpus Size ($N$) | Bi-Encoder + Vector Index ($5.5\text{ ms} + \text{ANN}$) | Two-Stage RAG ($K=10$ Candidates) | Full-Corpus Cross-Encoder ($N$ Forward Passes) | Feasibility of Full Cross-Encoder |
 | :---: | :---: | :---: | :---: | :---: |
-| **$160$ Chunks** *(Our Catan PDF)* | $5.5\text{ ms}$ | **$22.23\text{ ms}$** | $\sim 268\text{ ms}$ | Noticeable delay (quarter of a second). |
+| **$160$ Chunks** *(Catan PDF Corpus)* | $5.5\text{ ms}$ | **$22.23\text{ ms}$** | $\sim 268\text{ ms}$ | Noticeable delay (quarter of a second). |
 | **$10{,}000$ Chunks** *(Small Manual / Codebase)* | $6.0\text{ ms}$ | **$22.7\text{ ms}$** | $\approx 16.8\text{ seconds}$ | **Unusable for interactive search.** |
 | **$100{,}000$ Chunks** *(Enterprise Policy Base)* | $8.8\text{ ms}$ | **$25.5\text{ ms}$** | $\approx 168\text{ seconds}$ ($2.8\text{ minutes}$) | **Catastrophic failure / request timeout.** |
 | **$1{,}000{,}000$ Chunks** *(Web-Scale / Wikipedia)* | $18.0\text{ ms}$ | **$35.2\text{ ms}$** | $\approx 28.7\text{ minutes}$ | **Completely impossible.** |
