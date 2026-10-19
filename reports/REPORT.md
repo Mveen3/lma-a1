@@ -1,6 +1,7 @@
 # Experimental Report: Two-Stage RAG Pipeline (Baseline Dense Retrieval vs. Cross-Encoder Re-Ranking)
 
 **Author:** Naveen Mishra  
+**Roll No.:** 2025201084  
 **Course:** Large Language Models & Multi-Agent Systems (LMA): Assignment 1  
 **GitHub Repository:** [https://github.com/Mveen3/lma-a1](https://github.com/Mveen3/lma-a1)  
 **Dataset:** Official Catan (5th Edition) Game Rules & Almanac (`data/catan_base_rules_2020.pdf`, 16 pages, 160 chunks)  
