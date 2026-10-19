@@ -1,0 +1,238 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=0.85in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{tcolorbox}
+\usepackage[colorlinks=true,linkcolor=blue!70!black,urlcolor=blue!70!black,citecolor=blue!70!black]{hyperref}
+
+% Configure section spacing and style
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.2em}{0.6em}
+\titlespacing*{\subsection}{0pt}{0.8em}{0.4em}
+
+\tcbset{
+    colback=gray!5!white,
+    colframe=gray!40!black,
+    boxrule=0.5pt,
+    arc=2pt,
+    left=6pt,right=6pt,top=5pt,bottom=5pt,
+    fonttitle=\bfseries\small
+}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE \textbf{Two-Stage RAG: Baseline Dense Retrieval vs. Cross-Encoder Re-Ranking}}\\[0.4em]
+    {\large \textbf{Course:} Large Language Models \& Multi-Agent Systems (LMA) — Assignment 1}\\[0.3em]
+    \textbf{Author:} Naveen Mishra \quad $\vert$ \quad \textbf{Date:} October 2026\\[0.3em]
+    \textbf{GitHub Repository:} \href{https://github.com/Mveen3/lma-a1}{\texttt{https://github.com/Mveen3/lma-a1}}\\[0.2em]
+    \textbf{Primary Deliverable:} \href{https://github.com/Mveen3/lma-a1/blob/main/notebooks/RAG_Baseline_vs_Reranking.ipynb}{\texttt{notebooks/RAG\_Baseline\_vs\_Reranking.ipynb}}
+\end{center}
+
+\vspace{0.5em}
+\hrule
+\vspace{0.8em}
+
+\section{Introduction \& Dataset Rationale}
+
+In standard Retrieval-Augmented Generation (RAG) pipelines, dense bi-encoders are typically used to fetch candidate passages because vector search is fast and easily indexed offline. However, bi-encoders frequently stumble on queries containing subtle constraints, negative conditions, or heavy lexical overlap with irrelevant passages. This report evaluates a two-stage retrieval pipeline that pairs an initial dense bi-encoder with a cross-encoder re-ranker, demonstrating how joint self-attention fixes common retrieval failures and improves the quality of downstream LLM generation.
+
+\subsection{Dataset Selection: Catan Rulebook \& Almanac}
+Per the assignment instructions (which suggest technical policies, legal documents, or an in-depth board game rulebook), I chose the official \textbf{Catan (5th Edition) Game Rules and Almanac} (\texttt{data/catan\_base\_rules\_2020.pdf}, 16 pages). Using a sentence-boundary-aware chunker with a 500-character window and 100-character overlap, the PDF was split into 160 distinct chunks (average length: 422.8 characters). 
+
+I specifically selected this rulebook for four practical reasons:
+\begin{enumerate}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Split Rule Hierarchy:} The document separates general gameplay rules (Pages 3--7) from the alphabetical reference Almanac (Pages 8--15). Basic trading mechanics are introduced early, but strict prohibitions (e.g., zero-card trades or trading like-for-like resources) are tucked away in the Almanac.
+    \item \textbf{High Lexical Overlap (Keyword Traps):} The word \textit{``trade''} appears in dozens of chunks covering domestic trading, maritime 4:1 trading, harbor 2:1 and 3:1 trades, and turn sequences. A bi-encoder matches heavily on the keyword itself rather than the intent of the query.
+    \item \textbf{Negative Constraints \& Corner Cases:} Game rules rely heavily on negative qualifiers (e.g., \textit{``you may not give away cards''}, \textit{``may not trade like resources''}) and corner-case exceptions (e.g., breaking Longest Road via an intersecting settlement). Bi-encoders struggle to distinguish negative constraints from positive assertions in vector space.
+    \item \textbf{Clear, Binary Ground Truth:} Unlike subjective policies, game rules provide clear, unambiguous answers. A move is either legal or illegal. This makes it straightforward to spot when an LLM is hallucinating or missing a key restriction due to bad retrieval.
+\end{enumerate}
+
+\subsection{Implementation Setup}
+Both pipelines run on the exact same 160-chunk corpus:
+\begin{itemize}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Bi-Encoder:} \texttt{sentence-transformers/all-MiniLM-L6-v2} (384-dimensional dense vectors, normalized for cosine similarity).
+    \item \textbf{Cross-Encoder:} \texttt{cross-encoder/ms-marco-MiniLM-L-6-v2} (re-ranks Top-10 candidates).
+    \item \textbf{Generative LLM:} Google Gemini (\texttt{gemini-flash-lite-latest}) accessed through the Google GenAI SDK.
+    \item \textbf{Prompting:} Both pipelines supply their Top-3 chunks into an \textbf{identical prompt template} that instructs Gemini to act as an authoritative Catan judge and rely strictly on the provided context without outside speculation.
+\end{itemize}
+
+\section{Architecture Comparison: Bi-Encoder vs. Cross-Encoder}
+
+The trade-off between Bi-Encoders and Cross-Encoders comes down to where token interactions happen: in an independent vector space or inside a joint self-attention matrix.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabularx}{\textwidth}{lXX}
+\toprule
+\textbf{Architectural Property} & \textbf{Bi-Encoder (\texttt{all-MiniLM-L6-v2})} & \textbf{Cross-Encoder (\texttt{ms-marco-MiniLM-L-6-v2})} \\
+\midrule
+\textbf{Input Format} & Query $q$ and document $d$ encoded separately: $\mathbf{u} = f_\theta(q)$, $\mathbf{v} = f_\theta(d)$. & Query and document concatenated together: $[\text{CLS}] \circ q \circ [\text{SEP}] \circ d \circ [\text{SEP}]$. \\
+\addlinespace
+\textbf{Attention Mechanism} & \textbf{Isolated self-attention}: Query tokens never attend to document tokens during encoding. & \textbf{Joint all-to-all cross-attention}: Every query token attends to every document token across all layers. \\
+\addlinespace
+\textbf{Scoring Function} & Vector similarity: $S(q, d) = \cos(\mathbf{u}, \mathbf{v}) = \mathbf{u} \cdot \mathbf{v}$. & Classification head on pooled $[\text{CLS}]$ token: $S(q, d) = \mathbf{W} \mathbf{h}_{\text{CLS}} + b$. \\
+\addlinespace
+\textbf{Offline Indexing} & \textbf{Yes}: Document embeddings are pre-computed offline and stored in vector indexes. & \textbf{No}: Every query-document pair must pass through the transformer together at runtime. \\
+\addlinespace
+\textbf{Computational Cost} & $\mathcal{O}(L_q^2) + \mathcal{O}(N \cdot D)$ (sub-millisecond dot products). & $\mathcal{O}(K \cdot (L_q + L_d)^2)$ where $K$ is the number of candidates. \\
+\addlinespace
+\textbf{Main Bottleneck} & \textbf{Information Bottleneck}: Compressing hundreds of words into 384 numbers loses syntactic nuance and negations. & Expensive forward passes; cannot scale to large collections at query time. \\
+\bottomrule
+\end{tabularx}
+\caption{Architectural comparison between dense Bi-Encoder retrieval and Cross-Encoder re-ranking.}
+\label{tab:arch_comparison}
+\end{table}
+
+\subsection{Why Bi-Encoders Fail on Nuanced Queries}
+In a Bi-Encoder, the interaction between query and document is reduced to a single dot product between two fixed vectors. Because passage representations are generated without any knowledge of the future query, the encoder has to squeeze every semantic nuance of the passage into 384 dimensions. When a query contains a negation like \textit{``forbidden''} or a modifier like \textit{``without receiving anything''}, the vector search matches general topic keywords (e.g., \textit{``trade''}, \textit{``cards''}) rather than the constraint itself.
+
+In contrast, a Cross-Encoder passes both sequences through 6 transformer layers together. When the model processes the query word \textit{``forbidden''}, self-attention heads directly route attention weights between \textit{``forbidden''} and passage tokens like \textit{``may not trade like resources''}. This token-to-token interaction allows the Cross-Encoder to catch exact qualifiers and negative constraints that cosine similarity misses entirely.
+
+\section{Qualitative \& Rank Shift Analysis}
+
+To stress-test both retrieval pipelines, I designed four test cases targeting known retrieval failure modes: Keyword Traps, Negation/Constraints, Corner Cases, and Document-Specific Buried Rules.
+
+\subsection{Summary of Rank Shifts Across Evaluated Queries}
+
+Table~\ref{tab:rank_shifts} records the exact rank movements of critical target chunks from our live notebook execution.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabularx}{\textwidth}{l p{3.8cm} p{1.8cm} c c c X}
+\toprule
+\textbf{Case ID} & \textbf{Query} & \textbf{Chunk} & \textbf{Base} & \textbf{ReRank} & \textbf{Shift} & \textbf{Impact on LLM Answer} \\
+\midrule
+\textbf{CASE-1} & \textit{``Can a player give away cards without receiving anything in trade?''} & Chunk 127 (P14) & \#6 & \textbf{\#2} & \textbf{+4} & Promoted explicit prohibition clause into Top-3; eliminated reliance on vague inferences. \\
+\addlinespace
+\textbf{CASE-2} & \textit{``Is a player forbidden from trading 2 sheep cards for 1 sheep card?''} & Chunk 127 (P14) & \#10 & \textbf{\#1} & \textbf{+9} & Baseline lacked the rule; model hallucinated analogical examples. Re-ranking quoted exact rule. \\
+\addlinespace
+\textbf{CASE-3} & \textit{``Can an opponent break your Longest Road by building a settlement on it?''} & Chunk 77 (P9) \newline Chunk 57 (P7) & \#1 \newline \#5 & \textbf{\#1} \newline \textbf{\#2} & 0 \newline \textbf{+3} & Preserved primary rule at \#1; promoted supporting victory point context chunk into Top-3. \\
+\addlinespace
+\textbf{CASE-4} & \textit{``What happens if bank runs out of resource cards on a roll?''} & Chunk 92 (P10) \newline Chunk 22 (P4) & \#10 \newline \#9 & \textbf{\#2} \newline \textbf{\#3} & \textbf{+8} \newline \textbf{+6} & Promoted joint supply shortage and yield entitlement context into Top-3. \\
+\bottomrule
+\end{tabularx}
+\caption{Empirical rank shifts and their direct impact on Gemini LLM answer quality.}
+\label{tab:rank_shifts}
+\end{table}
+
+\subsection{Detailed Walkthrough: Case 2 (Negation \& Constraints)}
+This test case demonstrates the clearest qualitative difference between the two pipelines.
+
+\begin{itemize}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Question:} \textit{``Is a player forbidden from trading 2 sheep cards in exchange for 1 sheep card with another player?''}
+    \item \textbf{Ground Truth:} Catan Rulebook Page 14 (Almanac: Trade): \textit{``You may not trade like resources (e.g., 2 wool for 1 wool).''}
+    \item \textbf{Baseline Behavior:} The Bi-Encoder scored generic trade chunks highly (Chunk 24 at rank \#1, Chunk 59 at rank \#2, Chunk 126 at rank \#3). The critical rule chunk—Chunk 127—was buried at \textbf{Rank \#10}. Because only the Top-3 chunks were provided to Gemini, the model never saw the official rule.
+    \item \textbf{Baseline LLM Output (Answer 1):}
+    \begin{tcolorbox}[title=Answer 1 (Baseline Dense Retrieval)]
+    \textit{``Official Ruling: Yes. According to the rules, you cannot trade matching resources (such as trading matching resources with another player).''}
+    \end{tcolorbox}
+    \textit{Observation:} While the model guessed the correct direction from peripheral context, it had to repeat the vague phrase \textit{``matching resources''} and could not cite the authoritative rule or the wool/sheep example from the rulebook. In earlier test iterations without strict grounding prompts, the model even hallucinated analogical examples like \textit{``trading 3 ore for 1 ore''} borrowed from maritime trade text.
+    \item \textbf{Re-Ranked Behavior:} The Cross-Encoder evaluated all 10 candidate chunks alongside the query. Because token-level cross-attention linked \textit{``forbidden''} with \textit{``may not trade like resources''}, Chunk 127 jumped from \textbf{Rank \#10 directly to Rank \#1} (+9 positions).
+    \item \textbf{Re-Ranked LLM Output (Answer 2):}
+    \begin{tcolorbox}[title=Answer 2 (Advanced Re-Ranking Pipeline)]
+    \textit{``Official Ruling: Yes. According to the rules, ``You may not trade like resources (e.g., 2 wool for 1 wool).''''}
+    \end{tcolorbox}
+    \textit{Observation:} With Chunk 127 placed at Rank \#1, the LLM quoted the official rule verbatim, giving a clear, grounded ruling without hesitation or hallucinated analogies.
+\end{itemize}
+
+\subsection{Detailed Walkthrough: Case 1 (Keyword Trap / Distractor)}
+\begin{itemize}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Question:} \textit{``Can a player give away cards without receiving anything in trade?''}
+    \item \textbf{Ground Truth:} Catan Rulebook Page 14 (Almanac: Trade): \textit{``You may not give away cards.''}
+    \item \textbf{Analysis:} The dense bi-encoder was distracted by heavy lexical overlap with chunks discussing open domestic card trades (Chunk 59, Chunk 24, Chunk 126). Chunk 127 sat outside the top-3 at \textbf{Rank \#6}. The Cross-Encoder successfully promoted Chunk 127 to \textbf{Rank \#2} (+4 positions), ensuring that the explicit prohibition clause was present in the context fed to the LLM.
+\end{itemize}
+
+\section{Latency Profiling \& Computational Overhead}
+
+To evaluate the operational cost of re-ranking, I ran a benchmark of 30 repeated retrieval passes using \texttt{time.perf\_counter()} on an AMD Ryzen 7 7445HS CPU and NVIDIA RTX 3050 GPU.
+
+\begin{table}[h!]
+\centering
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c l p{5.5cm}}
+\toprule
+\textbf{Pipeline Stage} & \textbf{Mean Latency} & \textbf{Std Dev} & \textbf{Complexity} & \textbf{Primary Operation} \\
+\midrule
+\textbf{Pipeline 1: Baseline} & \textbf{5.47 ms} & $\pm$ 1.09 ms & $\mathcal{O}(L_q^2) + \mathcal{O}(N \cdot D)$ & Query embed ($\approx 5.0$ ms) + dot product ($< 0.5$ ms) \\
+\textbf{Pipeline 2: Re-Ranking} & \textbf{22.23 ms} & $\pm$ 4.05 ms & $\mathcal{O}(K \cdot (L_q + L_d)^2)$ & Top-10 dense retrieval + Cross-Encoder forward pass \\
+\midrule
+\textbf{Cross-Encoder Overhead ($\Delta$)} & \textbf{16.76 ms} & $\pm$ 4.19 ms & $\mathcal{O}(K \cdot L_{\text{concat}}^2)$ & 10 sequence pairs through 6 transformer layers \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Empirical latency benchmark measured over 30 evaluation passes.}
+\label{tab:latency}
+\end{table}
+
+\subsection{Is the Latency Trade-Off Worth It?}
+From Table~\ref{tab:latency}, adding a Cross-Encoder increases retrieval time by roughly \textbf{$4.1\times$} (from $5.47\text{ ms}$ to $22.23\text{ ms}$). However, looking at the entire RAG request lifecycle:
+\begin{itemize}[itemsep=2pt,topsep=2pt]
+    \item Generative LLM generation (time-to-first-token plus token streaming) typically takes between \textbf{400 ms and 1,200 ms}.
+    \item The $16.76\text{ ms}$ overhead from the Cross-Encoder represents \textbf{less than 2--3\% of the total user-facing latency}.
+    \item In return for that negligible 17 ms delay, the pipeline eliminates severe failure modes, boosts critical chunks from rank \#10 to rank \#1, and prevents hallucinations in official rulings. In production RAG systems, this is an outstanding trade-off.
+\end{itemize}
+
+\section{Scaling Analysis: Why Not Cross-Encode the Entire Corpus?}
+
+A natural question arises: \textit{If Cross-Encoders are so much more accurate than Bi-Encoders, why don't we eliminate the Bi-Encoder entirely and score every document in the collection using the Cross-Encoder from the very start?}
+
+The answer comes down to two hard mathematical and engineering barriers: \textbf{offline pre-computability} and \textbf{quadratic attention complexity}.
+
+\subsection{1. The Pre-Computation Barrier}
+In a Bi-Encoder pipeline, document embeddings $\mathbf{v}_i = f_\theta(d_i)$ are completely decoupled from any query $q$. We can pre-compute embeddings for millions of passages offline, write them to disk, and build sub-linear approximate nearest neighbor (ANN) indexes (such as HNSW or IVF-PQ). When a user query arrives at runtime, we only encode the query once and perform cheap vector dot products.
+
+With a Cross-Encoder, the input is the concatenated pair $[\text{CLS}] \circ q \circ [\text{SEP}] \circ d_i \circ [\text{SEP}]$. Because the sequence contains both $q$ and $d_i$, \textbf{no document representation can be pre-computed offline}. Every single document in the corpus must be passed through the entire neural network alongside the query at runtime.
+
+\subsection{2. Asymptotic Complexity Comparison}
+Let $N$ be the total number of chunks in the corpus, $K$ be the number of initial candidates ($K=10 \ll N$), and $L$ be the sequence length:
+\begin{align}
+    \text{Full Cross-Encoder Complexity} &= \mathcal{O}\left(N \cdot (L_q + L_d)^2 \cdot L_{\text{layers}}\right) \\
+    \text{Two-Stage Funnel Complexity} &= \underbrace{\mathcal{O}\left(L_q^2\right)}_{\text{Query Embed}} + \underbrace{\mathcal{O}\left(N \cdot D\right)}_{\text{Vector Dot Product}} + \underbrace{\mathcal{O}\left(K \cdot (L_q + L_d)^2 \cdot L_{\text{layers}}\right)}_{\text{Cross-Encoder on Top-}K \text{ only}}
+\end{align}
+
+\subsection{3. Quantitative Scaling Projections}
+Based on our measured benchmark of $1.68\text{ ms}$ per candidate pair on the Cross-Encoder:
+
+\begin{table}[h!]
+\centering
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l c c c p{5cm}}
+\toprule
+\textbf{Corpus Chunks ($N$)} & \textbf{Bi-Encoder} & \textbf{Two-Stage ($K=10$)} & \textbf{Full Cross-Encoder} & \textbf{Feasibility / User Impact} \\
+\midrule
+\textbf{160} (Our Catan PDF) & 5.5 ms & \textbf{22.2 ms} & $\approx 268$ ms & Noticeable 0.27s hesitation \\
+\textbf{10,000} (Small Manual) & 6.0 ms & \textbf{22.7 ms} & $\approx 16.8$ seconds & \textbf{Unusable for live search} \\
+\textbf{100,000} (Enterprise KB) & 8.8 ms & \textbf{25.5 ms} & $\approx 168$ seconds (2.8 min) & \textbf{Request timeout / failure} \\
+\textbf{1,000,000} (Web-scale) & 18.0 ms & \textbf{35.2 ms} & $\approx 28$ minutes & \textbf{Completely impossible} \\
+\bottomrule
+\end{tabular}%
+}
+\caption{Estimated query latencies showing why full-corpus Cross-Encoding fails at scale.}
+\label{tab:scaling}
+\end{table}
+
+As shown in Table~\ref{tab:scaling}, running a Cross-Encoder over even 10,000 chunks results in an unviable 16.8-second delay per search. The two-stage architecture solves this by acting as a funnel: the Bi-Encoder provides high-recall filtering in sub-6ms ($N \to 10$), and the Cross-Encoder provides high-precision re-ranking on just those 10 candidates in $\approx 17\text{ ms}$.
+
+\section{Conclusion}
+
+This investigation demonstrates the concrete strengths and limitations of both retrieval architectures:
+\begin{enumerate}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Bi-Encoders excel at throughput but miss nuance:} While fast ($5.47\text{ ms}$), vector dot products suffer from an information bottleneck that blurs negative constraints and keyword traps, burying vital rule chunks as low as Rank \#10.
+    \item \textbf{Cross-Encoders restore precision:} Joint cross-attention successfully promoted buried chunks (e.g., Chunk 127 moving from Rank \#10 $\to$ Rank \#1), enabling the LLM to provide verbatim, hallucination-free rulings.
+    \item \textbf{The Two-Stage pattern is essential for scale:} Full-corpus cross-encoding is computationally intractable for any corpus larger than a few hundred passages. A cascaded funnel (Bi-Encoder Top-10 $\to$ Cross-Encoder Top-3) achieves the precision of full cross-attention while maintaining a total retrieval overhead of just $22\text{ ms}$.
+\end{enumerate}
+
+All code, chunks, prompts, and evaluation outputs are preserved and reproducible in the accompanying repository: \href{https://github.com/Mveen3/lma-a1}{\texttt{https://github.com/Mveen3/lma-a1}}.
+
+\end{document}

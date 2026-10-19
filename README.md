@@ -32,7 +32,9 @@ lma-a1/
 ├── notebooks/
 │   └── RAG_Baseline_vs_Reranking.ipynb  # Primary deliverable: fully executed RAG notebook
 ├── reports/
-│   └── REPORT.md                        # Comprehensive experimental analysis report
+│   ├── REPORT.pdf                       # Main submission report (Compiled PDF)
+│   ├── REPORT.tex                       # LaTeX source code
+│   └── REPORT.md                        # Markdown version of report
 ├── .env.example                         # Template for API keys
 ├── .gitignore                           # Git ignore rules
 ├── README.md                            # Project documentation
@@ -87,4 +89,4 @@ The notebook is configured to dynamically resolve data paths whether executed fr
 | **Pipeline 1 (Bi-Encoder Search)** | **$5.47\text{ ms}$** | $\pm 1.09\text{ ms}$ | Sub-millisecond vector dot product after query embedding. |
 | **Pipeline 2 (Bi-Encoder + Cross-Encoder)** | **$22.23\text{ ms}$** | $\pm 4.05\text{ ms}$ | Cross-Encoder evaluates 10 candidate pairs ($16.76\text{ ms}$ overhead). |
 
-> 📖 **Full Analysis:** For deep-dive architectural comparisons, mathematical complexity formulas, dataset selection rationale, and enterprise scaling discussions, refer to [`reports/REPORT.md`](reports/REPORT.md).
+> 📖 **Full Analysis:** For deep-dive architectural comparisons, mathematical complexity formulas, dataset selection rationale, and enterprise scaling discussions, refer to [`reports/REPORT.pdf`](reports/REPORT.pdf) or [`reports/REPORT.md`](reports/REPORT.md).
