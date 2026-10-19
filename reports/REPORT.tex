@@ -1,28 +1,29 @@
 \documentclass[11pt,a4paper]{article}
 
-\usepackage[margin=0.85in]{geometry}
+\usepackage[margin=0.8in]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
 \usepackage{tabularx}
 \usepackage{xcolor}
 \usepackage{enumitem}
 \usepackage{titlesec}
+\usepackage{array}
 \usepackage{tcolorbox}
 \usepackage[colorlinks=true,linkcolor=blue!70!black,urlcolor=blue!70!black,citecolor=blue!70!black]{hyperref}
 
 % Configure section spacing and style
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}[\titlerule]
 \titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
-\titlespacing*{\section}{0pt}{1.2em}{0.6em}
-\titlespacing*{\subsection}{0pt}{0.8em}{0.4em}
+\titlespacing*{\section}{0pt}{1.1em}{0.5em}
+\titlespacing*{\subsection}{0pt}{0.7em}{0.3em}
 
+% Simple, clean, unpretentious box styling
 \tcbset{
-    colback=gray!5!white,
-    colframe=gray!40!black,
+    colback=gray!3!white,
+    colframe=gray!40,
     boxrule=0.5pt,
-    arc=2pt,
-    left=6pt,right=6pt,top=5pt,bottom=5pt,
-    fonttitle=\bfseries\small
+    arc=1pt,
+    left=9pt,right=9pt,top=6pt,bottom=6pt
 }
 
 \begin{document}
@@ -96,6 +97,7 @@ In a Bi-Encoder, the interaction between query and document is reduced to a sing
 
 In contrast, a Cross-Encoder passes both sequences through 6 transformer layers together. When the model processes the query word \textit{``forbidden''}, self-attention heads directly route attention weights between \textit{``forbidden''} and passage tokens like \textit{``may not trade like resources''}. This token-to-token interaction allows the Cross-Encoder to catch exact qualifiers and negative constraints that cosine similarity misses entirely.
 
+\clearpage
 \section{Qualitative \& Rank Shift Analysis}
 
 To stress-test both retrieval pipelines, I designed four test cases targeting known retrieval failure modes: Keyword Traps, Negation/Constraints, Corner Cases, and Document-Specific Buried Rules.
@@ -107,16 +109,16 @@ Table~\ref{tab:rank_shifts} records the exact rank movements of critical target 
 \begin{table}[h!]
 \centering
 \small
-\begin{tabularx}{\textwidth}{l p{3.8cm} p{1.8cm} c c c X}
+\begin{tabularx}{\textwidth}{l p{3.8cm} p{2.5cm} >{\centering\arraybackslash}p{1.1cm} >{\centering\arraybackslash}p{1.3cm} >{\centering\arraybackslash}p{1.1cm} X}
 \toprule
-\textbf{Case ID} & \textbf{Query} & \textbf{Chunk} & \textbf{Base} & \textbf{ReRank} & \textbf{Shift} & \textbf{Impact on LLM Answer} \\
+\textbf{Case ID} & \textbf{Query} & \textbf{Chunk} & \textbf{Base} & \textbf{Re-Rank} & \textbf{Shift} & \textbf{Impact on LLM Answer} \\
 \midrule
 \textbf{CASE-1} & \textit{``Can a player give away cards without receiving anything in trade?''} & Chunk 127 (P14) & \#6 & \textbf{\#2} & \textbf{+4} & Promoted explicit prohibition clause into Top-3; eliminated reliance on vague inferences. \\
-\addlinespace
-\textbf{CASE-2} & \textit{``Is a player forbidden from trading 2 sheep cards for 1 sheep card?''} & Chunk 127 (P14) & \#10 & \textbf{\#1} & \textbf{+9} & Baseline lacked the rule; model hallucinated analogical examples. Re-ranking quoted exact rule. \\
-\addlinespace
+\addlinespace[2pt]
+\textbf{CASE-2} & \textit{``Is a player forbidden from trading 2 sheep cards for 1 sheep card?''} & Chunk 127 (P14) & \#10 & \textbf{\#1} & \textbf{+9} & Baseline lacked the rule; model guessed vaguely. Re-ranking quoted exact rule verbatim. \\
+\addlinespace[2pt]
 \textbf{CASE-3} & \textit{``Can an opponent break your Longest Road by building a settlement on it?''} & Chunk 77 (P9) \newline Chunk 57 (P7) & \#1 \newline \#5 & \textbf{\#1} \newline \textbf{\#2} & 0 \newline \textbf{+3} & Preserved primary rule at \#1; promoted supporting victory point context chunk into Top-3. \\
-\addlinespace
+\addlinespace[2pt]
 \textbf{CASE-4} & \textit{``What happens if bank runs out of resource cards on a roll?''} & Chunk 92 (P10) \newline Chunk 22 (P4) & \#10 \newline \#9 & \textbf{\#2} \newline \textbf{\#3} & \textbf{+8} \newline \textbf{+6} & Promoted joint supply shortage and yield entitlement context into Top-3. \\
 \bottomrule
 \end{tabularx}
@@ -124,24 +126,33 @@ Table~\ref{tab:rank_shifts} records the exact rank movements of critical target 
 \label{tab:rank_shifts}
 \end{table}
 
+\subsection{Observed Retrieval Failure Modes}
+Analyzing the rank movements across our four benchmark queries highlights three clear failure patterns in dense bi-encoder retrieval:
+\begin{enumerate}[itemsep=3pt,topsep=3pt]
+    \item \textbf{Lexical Lures \& Keyword Dominance (Case 1 \& 2):} When queries contain repeated topical keywords such as \textit{``trade''} or \textit{``cards''}, the bi-encoder assigns top ranks to general descriptive passages (e.g., domestic trade mechanics or basic turn steps) while burying passages containing the actual restriction or prohibition at ranks \#6 and \#10.
+    \item \textbf{Syntactic Blindness to Negation (Case 2):} The bi-encoder treats \textit{``forbidden from trading''} and \textit{``may not trade''} as semantically close to open trading rules, failing to understand that the negative qualifier completely inverts the query intent. The cross-encoder's joint self-attention immediately resolves this, boosting Chunk 127 by $+9$ positions to rank \#1.
+    \item \textbf{Multi-Chunk Context Dispersal (Case 3 \& 4):} Complex rules often span multiple sections---such as supply exhaustion requiring both the turn-production rule and the bank-shortage clause. Dense retrieval rarely pulls all required chunks into the Top-3 simultaneously, whereas the re-ranker successfully promoted both complementary chunks into top positions.
+\end{enumerate}
+
+\clearpage
 \subsection{Detailed Walkthrough: Case 2 (Negation \& Constraints)}
 This test case demonstrates the clearest qualitative difference between the two pipelines.
 
 \begin{itemize}[itemsep=2pt,topsep=2pt]
     \item \textbf{Question:} \textit{``Is a player forbidden from trading 2 sheep cards in exchange for 1 sheep card with another player?''}
     \item \textbf{Ground Truth:} Catan Rulebook Page 14 (Almanac: Trade): \textit{``You may not trade like resources (e.g., 2 wool for 1 wool).''}
-    \item \textbf{Baseline Behavior:} The Bi-Encoder scored generic trade chunks highly (Chunk 24 at rank \#1, Chunk 59 at rank \#2, Chunk 126 at rank \#3). The critical rule chunk—Chunk 127—was buried at \textbf{Rank \#10}. Because only the Top-3 chunks were provided to Gemini, the model never saw the official rule.
-    \item \textbf{Baseline LLM Output (Answer 1):}
-    \begin{tcolorbox}[title=Answer 1 (Baseline Dense Retrieval)]
+    \item \textbf{Baseline Behavior:} The Bi-Encoder scored generic trade chunks highly (Chunks 24, 59, 126 at ranks \#1--\#3). The governing prohibition chunk—Chunk 127—was buried at \textbf{Rank \#10}. Because only Top-3 chunks were provided to Gemini, the model never saw the official rule.
+    \item \textbf{Baseline LLM Output (Dense Bi-Encoder):}
+    \begin{tcolorbox}
     \textit{``Official Ruling: Yes. According to the rules, you cannot trade matching resources (such as trading matching resources with another player).''}
     \end{tcolorbox}
-    \textit{Observation:} While the model guessed the correct direction from peripheral context, it had to repeat the vague phrase \textit{``matching resources''} and could not cite the authoritative rule or the wool/sheep example from the rulebook. In earlier test iterations without strict grounding prompts, the model even hallucinated analogical examples like \textit{``trading 3 ore for 1 ore''} borrowed from maritime trade text.
-    \item \textbf{Re-Ranked Behavior:} The Cross-Encoder evaluated all 10 candidate chunks alongside the query. Because token-level cross-attention linked \textit{``forbidden''} with \textit{``may not trade like resources''}, Chunk 127 jumped from \textbf{Rank \#10 directly to Rank \#1} (+9 positions).
-    \item \textbf{Re-Ranked LLM Output (Answer 2):}
-    \begin{tcolorbox}[title=Answer 2 (Advanced Re-Ranking Pipeline)]
+    \textit{Observation:} While the model inferred the correct direction from peripheral context, it had to repeat the vague phrase \textit{``matching resources''} and could not cite the authoritative rule or the wool/sheep example from the rulebook. In earlier test iterations without strict grounding prompts, the model even hallucinated analogical examples like \textit{``trading 3 ore for 1 ore''} borrowed from maritime trade text.
+    \item \textbf{Re-Ranked Behavior:} The Cross-Encoder evaluated all 10 candidate chunks alongside the query. Token-level cross-attention linked \textit{``forbidden''} with \textit{``may not trade like resources''}, causing Chunk 127 to jump from \textbf{Rank \#10 directly to Rank \#1} (+9 positions).
+    \item \textbf{Re-Ranked LLM Output (Cross-Encoder Pipeline):}
+    \begin{tcolorbox}
     \textit{``Official Ruling: Yes. According to the rules, ``You may not trade like resources (e.g., 2 wool for 1 wool).''''}
     \end{tcolorbox}
-    \textit{Observation:} With Chunk 127 placed at Rank \#1, the LLM quoted the official rule verbatim, giving a clear, grounded ruling without hesitation or hallucinated analogies.
+    \textit{Observation:} With Chunk 127 placed at Rank \#1, the LLM quoted the official rule verbatim, providing a clear, grounded ruling without hesitation or hallucinated analogies.
 \end{itemize}
 
 \subsection{Detailed Walkthrough: Case 1 (Keyword Trap / Distractor)}
@@ -151,6 +162,13 @@ This test case demonstrates the clearest qualitative difference between the two 
     \item \textbf{Analysis:} The dense bi-encoder was distracted by heavy lexical overlap with chunks discussing open domestic card trades (Chunk 59, Chunk 24, Chunk 126). Chunk 127 sat outside the top-3 at \textbf{Rank \#6}. The Cross-Encoder successfully promoted Chunk 127 to \textbf{Rank \#2} (+4 positions), ensuring that the explicit prohibition clause was present in the context fed to the LLM.
 \end{itemize}
 
+\subsection{Walkthrough: Case 3 \& Case 4 (Corner Cases \& Multi-Chunk Context)}
+\begin{itemize}[itemsep=2pt,topsep=2pt]
+    \item \textbf{Case 3 (Breaking Longest Road):} The bi-encoder already placed the primary rule (Chunk 77, Page 9) at Rank \#1. However, the cross-encoder also promoted Chunk 57 (Page 7 victory point implications) from Rank \#5 to Rank \#2, providing the LLM with complete context to explain both road continuity and victory point redistribution.
+    \item \textbf{Case 4 (Bank Resource Exhaustion):} Answering what happens when resource cards run out requires two distinct rules: the production yield rule (Chunk 22, Page 4) and the bank exhaustion clause (Chunk 92, Page 10). The bi-encoder buried these at ranks \#9 and \#10. The cross-encoder promoted both into Top-3 (Chunk 92 $\to$ \#2, Chunk 22 $\to$ \#3), enabling an accurate, comprehensive answer.
+\end{itemize}
+
+\clearpage
 \section{Latency Profiling \& Computational Overhead}
 
 To evaluate the operational cost of re-ranking, I ran a benchmark of 30 repeated retrieval passes using \texttt{time.perf\_counter()} on an AMD Ryzen 7 7445HS CPU and NVIDIA RTX 3050 GPU.
@@ -186,7 +204,7 @@ From Table~\ref{tab:latency}, adding a Cross-Encoder increases retrieval time by
 
 A natural question arises: \textit{If Cross-Encoders are so much more accurate than Bi-Encoders, why don't we eliminate the Bi-Encoder entirely and score every document in the collection using the Cross-Encoder from the very start?}
 
-The answer comes down to two hard mathematical and engineering barriers: \textbf{offline pre-computability} and \textbf{quadratic attention complexity}.
+The answer comes down to two hard engineering barriers: \textbf{offline pre-computability} and \textbf{quadratic attention complexity}.
 
 \subsection{1. The Pre-Computation Barrier}
 In a Bi-Encoder pipeline, document embeddings $\mathbf{v}_i = f_\theta(d_i)$ are completely decoupled from any query $q$. We can pre-compute embeddings for millions of passages offline, write them to disk, and build sub-linear approximate nearest neighbor (ANN) indexes (such as HNSW or IVF-PQ). When a user query arrives at runtime, we only encode the query once and perform cheap vector dot products.
@@ -200,6 +218,7 @@ Let $N$ be the total number of chunks in the corpus, $K$ be the number of initia
     \text{Two-Stage Funnel Complexity} &= \underbrace{\mathcal{O}\left(L_q^2\right)}_{\text{Query Embed}} + \underbrace{\mathcal{O}\left(N \cdot D\right)}_{\text{Vector Dot Product}} + \underbrace{\mathcal{O}\left(K \cdot (L_q + L_d)^2 \cdot L_{\text{layers}}\right)}_{\text{Cross-Encoder on Top-}K \text{ only}}
 \end{align}
 
+\clearpage
 \subsection{3. Quantitative Scaling Projections}
 Based on our measured benchmark of $1.68\text{ ms}$ per candidate pair on the Cross-Encoder:
 
@@ -229,7 +248,7 @@ As shown in Table~\ref{tab:scaling}, running a Cross-Encoder over even 10,000 ch
 This investigation demonstrates the concrete strengths and limitations of both retrieval architectures:
 \begin{enumerate}[itemsep=2pt,topsep=2pt]
     \item \textbf{Bi-Encoders excel at throughput but miss nuance:} While fast ($5.47\text{ ms}$), vector dot products suffer from an information bottleneck that blurs negative constraints and keyword traps, burying vital rule chunks as low as Rank \#10.
-    \item \textbf{Cross-Encoders restore precision:} Joint cross-attention successfully promoted buried chunks (e.g., Chunk 127 moving from Rank \#10 $\to$ Rank \#1), enabling the LLM to provide verbatim, hallucination-free rulings.
+    \item \textbf{Cross-Encoders restore precision:} Joint cross-attention successfully promoted buried chunks (e.g., Chunk 127 jumping from Rank \#10 to \#1), enabling the LLM to provide verbatim, grounded rulings.
     \item \textbf{The Two-Stage pattern is essential for scale:} Full-corpus cross-encoding is computationally intractable for any corpus larger than a few hundred passages. A cascaded funnel (Bi-Encoder Top-10 $\to$ Cross-Encoder Top-3) achieves the precision of full cross-attention while maintaining a total retrieval overhead of just $22\text{ ms}$.
 \end{enumerate}
 
