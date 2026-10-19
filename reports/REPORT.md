@@ -5,9 +5,6 @@
 **Course:** Large Language Models & Multi-Agent Systems (LMA): Assignment 1  
 **GitHub Repository:** [https://github.com/Mveen3/lma-a1](https://github.com/Mveen3/lma-a1)  
 **Dataset:** Official Catan (5th Edition) Game Rules & Almanac (`data/catan_base_rules_2020.pdf`, 16 pages, 160 chunks)  
-**Deliverables:**
-- **Jupyter Notebook:** [`notebooks/RAG_Baseline_vs_Reranking.ipynb`](https://github.com/Mveen3/lma-a1/blob/main/notebooks/RAG_Baseline_vs_Reranking.ipynb)
-- **Experimental Report:** [`reports/REPORT.md`](https://github.com/Mveen3/lma-a1/blob/main/reports/REPORT.md)
 
 ---
 
